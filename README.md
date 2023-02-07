@@ -938,3 +938,267 @@ public class ServletExController {
 ![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/a8a648ea-a135-44f4-b7a8-ff47aa035c63/Untitled.png)
 
 ![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/68290b61-211e-42db-9f4a-f1b79d5b5dbe/Untitled.png)
+
+# 7. 스프링 부트 - 오류 페이지 2
+
+### BasicErrorController 가 제공하는 기본 정보들
+
+`BasicErrorController` 컨트롤러는 다음 정보를 model 에 담아서 뷰에 전달합니다. 뷰 템플릿은 이 값을 활용해서 출력할 수 있습니다.
+
+```java
+* timestamp: Fri Feb 05 00:00:00 KST 2021
+* status: 400
+* error: Bad Request
+* exception: org.springframework.validation.BindException
+* trace: 예외 trace
+* message: Validation failed for object='data'. Error count: 1
+* errors: Errors(BindingResult)
+* path: 클라이언트 요청 경로 (`/hello`)
+```
+
+`resources/templates/error/500.html` - 오류 정보 추가
+
+```html
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+<div class="container" style="max-width: 600px">
+    <div class="py-5 text-center">
+        <h2>500 오류 화면 스프링 부트 제공</h2>
+    </div>
+    <div>
+        <p>오류 화면 입니다.</p>
+    </div>
+    <ul>
+        <li>오류 정보</li>
+        <ul>
+            <li th:text="|timestamp: ${timestamp}|"></li>
+            <li th:text="|path: ${path}|"></li>
+            <li th:text="|status: ${status}|"></li>
+            <li th:text="|message: ${message}|"></li>
+            <li th:text="|error: ${error}|"></li>
+            <li th:text="|exception: ${exception}|"></li>
+            <li th:text="|errors: ${errors}|"></li>
+            <li th:text="|trace: ${trace}|"></li>
+        </ul>
+        </li>
+    </ul>
+    <hr class="my-4">
+</div> <!-- /container -->
+</body>
+</html>
+```
+
+오류 관련 내부 정보들을 고객에게 노출하는 것은 좋지 않습니다. 고객이 해당 정보를 읽어도 혼란만 더해지고, 보안상 문제가 될 수도 있습니다.다.
+
+그래서 `BasicErrorController` 오류 컨트롤러에서 다음 오류 정보를 `model` 에 포함할지 여부를 선택할 수 있습니다.
+
+`application.properties`
+
+`server.error.include-exception=false:` `exception` 포함 여부 (true, false)
+
+`server.error.include-message=never:` `message` 포함 여부
+
+`server.error.include-stacktrace=never:` `trace` 포함 여부
+
+`server.error.include-binding-errors=never:` `errors` 포함 여부
+
+`application.properties`
+
+```html
+server.error.include-exception=true
+server.error.include-message=on_param
+server.error.include-stacktrace=on_param
+server.error.include-binding-errors=on_param
+```
+
+기본 값이 `never` 인 부분은 다음 3 개의 옵션을 사용할 수 있습니다.
+
+`never`, `always`, `on_param`
+
+`never`: 사용하지 않음
+
+`always`: 항상 사용
+
+`on_param`: 파라미터가 있을 때 사용
+
+`on_param` 은 파라미터가 있으면 해당 정보를 노출한다. 디버그 시 문제를 확인하기 위해 사용할 수 있다.
+
+그런데 이 부분도 개발 서버에서 사용할 수 있지만, 운영 서버에서는 권장하지 않는다.
+
+`on_param` 으로 설정하고 다음과 같이 HTTP 요청시 쿼리 파라미터를 전달하면 해당 정보들이 `model` 에 담겨서 뷰 템플릿에서 출력된다. `message=&errors=&trace=`
+
+테스트
+
+http://localhost:8080/error-ex
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/68d08d5c-dd64-4888-be4b-933c98c900cd/Untitled.png)
+
+http://localhost:8080/error-ex?message=&errors=&trace=
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b8107f3d-5de2-4aea-9861-014df6aca61c/Untitled.png)
+
+**그런데 당연히 실무에서는 이것들을 노출하면 안 됩니다.**
+
+사용자에게는 이쁜 오류 화면과 고객이 이해할 수 있는 간단한 오류 메시지를 보여주고 오류는 서버에 로그로 남겨서 로그로 확인해야 합니다!
+
+### 스프링 부트 오류 관련 옵션 (application.properties 에)
+
+`server.error.whitelabel.enabled=true`: 오류 처리 화면을 못 찾을 시, 스프링 whitelabel 오류 페이지 적용
+
+`server.error.path=/error`: 오류 페이지 경로, 스프링이 자동 등록하는 서블릿 글로벌 오류 페이지 경로와 `BasicErrorController` 오류 컨트롤러 경로에 함께 사용된다.
+
+**확장 포인트**
+
+에러 공통 처리 컨트롤러의 기능을 변경하고 싶으면 `ErrorController` 인터페이스를 상속 받아서 구현하거나 `BasicErrorController` 상속 받아서 기능을 추가하면 된다.
+
+**정리**
+
+스프링 부트가 기본으로 제공하는 오류 페이지를 활용하면 오류 페이지와 관련된 대부분의 문제는 손쉽게 해결할 수 있다.
+
+# ==============================
+
+# ========= 9. API 에외 처리 =========
+
+# 1. API 예외 처리 개요
+
+먼저 API 예외 처리는 어떻게 해야 할까요?
+
+HTML 페이지의 경우 지금까지 설명했던 것 처럼 4xx, 5xx 와 같은 오류 페이지만 있으면 대부분의 문제를 해결할 수 있습니다.
+
+**그런데 API의 경우에는 생각할 내용이 더 많습니다.**
+
+ 오류 페이지는 단순히 고객에게 오류 화면을 보여주고 끝이지만 API 는 각 오류 상황에 맞는 오류 응답 스펙을 정하고 JSON 으로 데이터를 내려주어야 합니다.
+
+지금부터 API 의 경우 어떻게 예외 처리를 하면 좋은지 알아봅시다.
+
+API 도 오류 페이지에서 설명했던 것처럼 처음으로 돌아가서 서블릿 오류 페이지 방식을 사용해봅시다.
+
+`WebServerCustomizer` 다시 동작
+
+```java
+package hello.exception;
+
+import org.springframework.boot.web.server.ConfigurableWebServerFactory;
+import org.springframework.boot.web.server.ErrorPage;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+
+// 스프링 부트 기본 매커니즘을 사용할 때 @Component 을 주석 처리합니다.
+
+@Component
+public class WebServerCustomizer implements WebServerFactoryCustomizer<ConfigurableWebServerFactory> {
+
+    @Override
+    public void customize(ConfigurableWebServerFactory factory) {
+        ErrorPage errorPage404 = new ErrorPage(HttpStatus.NOT_FOUND, "/error-page/404");
+        ErrorPage errorPage500 = new ErrorPage(HttpStatus.INTERNAL_SERVER_ERROR, "/error-page/500");
+        ErrorPage errorPageEx = new ErrorPage(RuntimeException.class, "/error-page/500");
+        factory.addErrorPages(errorPage404, errorPage500, errorPageEx);
+
+    }
+}
+```
+
+`WebServerCustomizer` 가 다시 사용되도록 하기 위해 `@Component` 애노테이션에 있는 주석을 풉시다. 
+
+이제 WAS 에 예외가 전달되거나, `response.sendError()` 가 호출되면 위에 등록한 예외 페이지 경로가 호출됩니다.
+
+`ApiExceptionController` - API 예외 컨트롤러
+
+```java
+package hello.exception.api;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RestController;
+
+@Slf4j
+@RestController
+public class ApiExceptionController {
+    @GetMapping("/api/members/{id}")
+    public MemberDto getMember(@PathVariable("id") String id) {
+
+        if (id.equals("ex")) {
+            throw new RuntimeException("잘못된 사용자");
+        }
+        return new MemberDto(id, "hello " + id);
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class MemberDto {
+        private String memberId;
+        private String name;
+    }
+
+}
+```
+
+단순히 회원을 조회하는 기능을 하나 만들었다. 예외 테스트를 위해 URL 에 전달된 `id` 의 값이 `ex` 이면 예외가 발생하도록 코드를 심어두었다.
+
+### Postman 으로 테스트
+
+HTTP Header 에 `Accept` 가 `application/json` 인 것을 꼭 확인합시다.
+
+만약 정상 호출이라면 
+
+http://localhost:8080/api/members/spring
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/907b1354-c5d8-4517-8b8d-d152278275b9/Untitled.png)
+
+여기서는 Accept 의 VALUE 을 자동으로 설정해주는 것 같다.
+
+만약 비정상적인 호출(예외 발생 호출)이라면
+
+http://localhost:8080/api/member/ex
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/677116b8-b51b-44f6-a210-c6447e890008/Untitled.png)
+
+API를 요청했는데, 정상의 경우 API로 JSON 형식으로 데이터가 정상 반환된다. 
+
+그런데 오류가 발생하면 우리가 미리 만들어둔 오류 페이지 HTML이 반환된다. JSON 으로 데이터를 가져올 때 이런 식으로 HTML 을 가져오면 안된다. 
+
+클라이언트는 정상 요청이든, 오류 요청이든 JSON이 반환되어야 합니다. 웹 브라우저가 아닌 이상 HTML을 직접 받아서 할 수 있는 것은 없습니다.
+
+**문제를 해결하려면 오류 페이지 컨트롤러도 JSON 응답을 할 수 있도록 수정해야 합니다!!**
+
+`ErrorPageController` - API 응답 추가
+
+```java
+@RequestMapping(value = "/error-page/500", produces = MediaType.APPLICATION_JSON_VALUE)
+public ResponseEntity<Map<String, Object>> errorPage500Api(
+        HttpServletRequest request, HttpServletResponse response) {
+    
+    log.info("API errorPage 500");
+    Map<String, Object> result = new HashMap<>();
+    Exception ex = (Exception) request.getAttribute(ERROR_EXCEPTION);
+    result.put("status", request.getAttribute(ERROR_STATUS_CODE));
+    result.put("message", ex.getMessage());
+
+    Integer statusCode = (Integer) request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
+    return new ResponseEntity(result, HttpStatus.valueOf(statusCode));
+}
+```
+
+`produces = MediaType.APPLICATION_JSON_VALUE` 의 뜻은 클라이언트가 요청하는 HTTP Header 의 `Accept` 의 값이 `application/json` 일 때 해당 메서드가 호출된다는 것이다. 결국 클라이언트가 받고 싶은 미디어타입이 json이면 이 컨트롤러의 메서드가 호출된다.
+
+응답 데이터를 위해서 `Map` 을 만들고 `status`, `message` 키에 값을 할당했습니다. Jackson 라이브러리는 `Map` 을 JSON 구조로 변환할 수 있습니다.
+
+`ResponseEntity` 을 사용해서 응답하기 때문에 메시지 컨버터가 동작하면서 클라이언트에 JSON 이 반환됩니다.
+
+포스트맨을 통해서 다시 테스트해봅시다.
+
+http://localhost:8080/api/members/ex
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/e424e3d3-3643-447e-8f25-183a83af966a/Untitled.png)
+
+HTTP Header 에 `Accept` 가 `application/json` 이 아니면, 기존 오류 응답인 HTML 응답이 출력되는 것을 확인할 수 있습니다.

@@ -6,8 +6,9 @@ import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
-// 스프링 부트 기본 매커니즘을 사용할 때 주석 처리합니다.
-//@Component
+// 스프링 부트 기본 매커니즘을 사용할 때 @Component 을 주석 처리합니다.
+
+@Component
 public class WebServerCustomizer implements WebServerFactoryCustomizer<ConfigurableWebServerFactory> {
 
     @Override
