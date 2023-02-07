@@ -744,3 +744,197 @@ WAS(/hello, dispatchType=REQUEST) -> 필터 -> 서블릿 -> 인터셉터 -> 컨�
 3. WAS 오류 페이지 확인
 4. WAS(/error-page/500, dispatchType=ERROR) -> 필터(x) -> 서블릿 -> 인터셉터(x) -> 컨트롤러(/error-page/500) -> View
 ```
+
+# 6. 스프링 부트 - 오류 페이지 1
+
+지금까지는 예외 처리 페이지를 만들기 위해서 다음과 같은 복잡한 과정을 거쳤습니다.
+
+`WebServerCustomizer`  을 만들고
+
+예외 종류에 따라서 `ErrorPage` 을 추가하고
+
+예외 처리용 컨트롤러 `ErrorPageController` 을 만들었다.
+
+그런데 스프링 부트는 이런 과정을 모두 기본으로 제공합니다.
+
+`ErrorPage` 을 자동으로 등록한다. 이 때 `/error` 라는 경로로 기본 오류 페이지를 설정합니다.
+
+`new ErrorPage(”/error”)`, 상태코드와 예외를 설정하지 않으면 기본 오류 페이지로 사용됩니다.
+
+서블릿 밖으로 예외가 발생하거나, `response.sendError(…)` 가 호출되면 모든 오류는 `/error` 을 호출하게 됩니다.
+
+`BasicErrorController` 라는 스프링 컨트롤러를 자동으로 등록합니다.
+
+`ErrorPage` 에서 등록한 `/error` 을 매핑해서 처리하는 컨트롤러입니다.
+
+참고
+
+`ErrorMvcAutoConfiguration` 이라는 클래스가 오류 페이지를 자동으로 등록하는 역할을 합니다.
+
+### **주의**
+
+스프링 부트가 제공하는 기본 오류 매커니즘을 사용하도록 `WebServerCustomizer` 에 있는 `@Component` 을 주석처리 해야 합니다.
+
+이제 오류가 발생했을 때 오류 페이지로 `/error` 을 기본 요청합니다. 스프링 부트가 자동 등록한 `BasicErrorController` 는 이 경로를 기본으로 받습니다.
+
+### 개발자는 오류 페이지만 등록하면 됩니다.
+
+`BasicErrorController` 는 기본적인 로직이 모두 개발되어 있습니다.
+
+개발자는 오류 페이지 화면만 `BasicErrorController` 가 제공하는 룰과 우선순위에 따라서 등록하면 됩니다. 
+
+정적 HTML 이면 정적 리소스, 
+뷰 템플릿을 사용해서 동적으로 오류 화면을 만들고 싶으면 뷰 템플릿 경로에 오류 페이지 파일을 만들어서 넣어두기만 하면 됩니다.
+
+### 뷰 선택 우선순위
+
+`BasicErrorController` 의 처리 순서
+
+뷰 템플릿
+
+`resources/templates/error/500.html`
+
+`resources/templates/error/5xx.html`
+
+정적 리소스(`static`, `public`)
+
+`resources/static/error/400.html`
+
+`resources/static/error/404.html`
+
+`resources/static/error/4xx.html`
+
+적용 대상이 없을 때 뷰 이름(`error`)
+
+`resources/templates/error.html`
+
+해당 경로 위치에 HTTP 상태 코드 이름의 뷰 파일을 넣어두면 됩니다.
+
+뷰 템플릿이 정적 리소스보다 우선순위가 높고 404, 500처럼 구체적인 것이 5xx 처럼 덜 구체적인 것보다 우선순위가 높습니다. 5xx, 4xx 라고 하면 500대 오류와 400대 오류를 처리해줍니다.
+
+이제 오류 뷰 템플릿을 추가해봅시다.
+
+`resources/templates/error/4xx.html`
+
+```html
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+<div class="container" style="max-width: 600px">
+    <div class="py-5 text-center">
+        <h2>4xx 오류 화면 스프링 부트 제공</h2>
+    </div>
+    <div>
+        <p>오류 화면 입니다.</p>
+    </div>
+    <hr class="my-4">
+</div> <!-- /container -->
+</body>
+</html>
+```
+
+`resources/templates/error/404.html`
+
+```html
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+<div class="container" style="max-width: 600px">
+    <div class="py-5 text-center">
+        <h2>404 오류 화면 스프링 부트 제공</h2>
+    </div>
+    <div>
+        <p>오류 화면 입니다.</p>
+    </div>
+    <hr class="my-4">
+</div> <!-- /container -->
+</body>
+</html>
+```
+
+`resources/templates/error/500.html`
+
+```html
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+<div class="container" style="max-width: 600px">
+    <div class="py-5 text-center">
+        <h2>500 오류 화면 스프링 부트 제공</h2>
+    </div>
+    <div>
+        <p>오류 화면 입니다.</p>
+    </div>
+    <hr class="my-4">
+</div> <!-- /container -->
+</body>
+</html>
+```
+
+이렇게 세가지 오류 페이지를 등록했습니다. 
+
+`ServletExController` - `error400` 추가
+
+```java
+package hello.exception;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
+@Slf4j
+@Controller
+public class ServletExController {
+
+    @GetMapping("/error-ex")
+    public void errorEx() {
+        throw new RuntimeException("예외 발생!");
+    }
+
+    @GetMapping("/error-400")
+    public void error400(HttpServletResponse response) throws IOException {
+        response.sendError(400, "400 오류!");
+    }
+
+    @GetMapping("/error-404")
+    public void error404(HttpServletResponse response) throws IOException {
+        response.sendError(404, "404 오류!");
+    }
+
+    @GetMapping("/error-500")
+    public void error500(HttpServletResponse response) throws IOException {
+        response.sendError(500);
+    }
+
+}
+```
+
+서버를 실행시키고 나서 테스트를 해봅시다.
+
+[http://localhost:8080/error-404](http://localhost:8080/error-404) → 404.html
+
+[http://localhost:8080/error-400](http://localhost:8080/error-400) → 4xx.html (400 오류 페이지가 없지만 4xx 가 있다.)
+
+[http://localhost:8080/error-500](http://localhost:8080/error-500) → 500.html
+
+[http://localhost:8080/error-ex](http://localhost:8080/error-ex) → 500.html (예외는 500 으로 처리한다.)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/e3450d12-04d9-4d17-a4b0-14bdd26210c0/Untitled.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/4c3cea9d-4a03-4243-8a10-be4de23c967a/Untitled.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/a8a648ea-a135-44f4-b7a8-ff47aa035c63/Untitled.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/68290b61-211e-42db-9f4a-f1b79d5b5dbe/Untitled.png)
