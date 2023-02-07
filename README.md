@@ -617,3 +617,130 @@ public class WebConfig implements WebMvcConfigurer {
 아무것도 넣지 않으면 기본 값이 `DispatcherType.REQUEST` 이겠지요? 즉, 클라이언트의 요청인 경우에만 필터가 적용됩니다. 특별히 오류 페이지 경로도 필터를 적용할 것이 아니라면 기본 값 `DispatcherType.REQUEST` 을 사용하면 됩니다.
 
 물론 오류 페이지 요청 전용 필터를 적용하고 싶으면 `DispatcherType.ERROR` 만 지정하면 됩니다.
+
+# 5. 서블릿 예외 처리 - 인터셉터
+
+**이제 필터 중복 호출은 제거했으니 인터셉터 중복 호출을 제거해야 합니다.**
+
+`LogInterceptor` - `DispatcherType` 로그 추가
+
+```java
+package hello.exception.interceptor;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.ModelAndView;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.util.UUID;
+
+@Slf4j
+public class LogInterceptor implements HandlerInterceptor {
+
+    public static final String LOG_ID = "logId";
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        String requestURI = request.getRequestURI();
+        String uuid = UUID.randomUUID().toString();
+        request.setAttribute(LOG_ID, uuid);
+        log.info("REQUEST [{}][{}][{}][{}]", uuid, request.getDispatcherType(), handler);
+
+        return true;
+    }
+
+    @Override
+    public void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler, ModelAndView modelAndView) throws Exception {
+        log.info("postHandle [{}]", modelAndView);
+
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
+        String requestURI = request.getRequestURI();
+        String logId = (String) request.getAttribute(LOG_ID);
+        log.info("RESPONSE [{}][{}][{}]", logId, request.getDispatcherType(), requestURI);
+
+        if (ex != null) {
+            log.error("afterCompletion error!!", ex);
+        }
+    }
+}
+```
+
+앞서 필터의 경우에는 필터를 등록할 때 어떤 `DispatcherType` 인 경우에 필터를 적용할지를 선택할 수 있었습니다. 
+
+그런데 인터셉터는 서블릿이 제공하는 기능이 아니라 스프링이 제공하는 기능입니다. 
+
+즉, `DispatcherType` 과 무관하게 항상 호출되지요.
+
+대신에 인터셉터는 다음과 같이 요청 경로에 따라서 추가하거나 제외하기 쉽게 되어 있기 때문에, 이러한 설정을 사용해서 오류 페이지 경로를 `excludePathPatterns` 를 사용해서 빼주면 됩니다. 아래와 같이 말이죠.
+
+`WebConfig` - `addInterceptors()` 추가
+
+```java
+package hello.exception;
+
+import hello.exception.filter.LogFilter;
+import hello.exception.interceptor.LogInterceptor;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import javax.servlet.DispatcherType;
+import javax.servlet.Filter;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new LogInterceptor())
+                .order(1)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/css/**", "/*.ico", "/error", "/error-page/**");
+    }
+
+    @Bean
+    public FilterRegistrationBean logFilter() {
+        FilterRegistrationBean<Filter> filterRegistrationBean = new FilterRegistrationBean<>();
+        filterRegistrationBean.setFilter(new LogFilter());
+        filterRegistrationBean.setOrder(1);
+        filterRegistrationBean.addUrlPatterns("/*");
+        filterRegistrationBean.setDispatcherTypes(DispatcherType.REQUEST, DispatcherType.ERROR);
+
+        return filterRegistrationBean;
+    }
+
+}
+```
+
+인터셉터와 중복으로 처리되지 않기 위해 앞의 `logFilter()` 의 `@Bean` 에 주석을 달아두어야 합니다.
+
+현재 에러 페이지 내부 호출에서는 인터셉터가 호출되지 않지만 만약 여기에서 `/error-page/**` 를 제거하면 `error-page/500` 같은 내부 호출의 경우에도 인터셉터가 호출됩니다.
+
+### 전체 흐름 정리
+
+여기까지 전체 흐름을 정리해봅시다.
+
+`/hello` 정상 요청
+
+```java
+WAS(/hello, dispatchType=REQUEST) -> 필터 -> 서블릿 -> 인터셉터 -> 컨트롤러 -> View
+```
+
+`/error-ex` 오류 요청
+
+필터는 `DispatchType` 으로 중복 호출 제거 ( `dispatchType=REQUEST` )
+
+인터셉터는 경로 정보로 중복 호출 제거( `excludePathPatterns("/error-page/**")` )
+
+```java
+1. WAS(/error-ex, dispatchType=REQUEST) -> 필터 -> 서블릿 -> 인터셉터 -> 컨트롤러
+2. WAS(여기까지 전파) <- 필터 <- 서블릿 <- 인터셉터 <- 컨트롤러(예외발생)
+3. WAS 오류 페이지 확인
+4. WAS(/error-page/500, dispatchType=ERROR) -> 필터(x) -> 서블릿 -> 인터셉터(x) -> 컨트롤러(/error-page/500) -> View
+```
