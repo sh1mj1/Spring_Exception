@@ -1260,3 +1260,166 @@ http://localhost:8080/api/members/ex
 결과적으로 매우 세밀하고 복잡합니다. 따라서 이 방법은 HTML 화면을 처리할 때 사용하고 API 오류 처리는 뒤에서 섧명할 `@ExceptionHanlder` 을 이용하는 것이 좋습니다.
 
 그렇다면 복잡한 API 오류는 어떻게 처리해야 하는지 지금부터 하나씩 알아봅시다.
+
+# 3. HandlerExceptionResolver 시작
+
+우리는 예외 처리를 아래와 같이 할 것입니다.
+
+ 예외가 발생해서 서블릿을 넘어 WAS 까지 예외가 전달되면 HTTP 상태코드가 500으로 처리됩니다. 발생하는 예외에 따라서 400, 404 등등 다른 상태코드로 처리하고 싶습니다.
+
+그리고 오류 메시지, 형식 등을 API 마다 다르게 처리할 것입니다.
+
+### 상태코드 변환
+
+예를 들어서 `IllegalArgumentException`  을 처리하지 못해서 컨트롤러 밖으로 넘어가는 일이 발생하면 HTTP 상태 코드를 400으로 처리하고 싶습니다. 어떻게 해야 할까요?
+
+`ApiExceptionController` - 수정
+
+```java
+@Slf4j
+@RestController
+public class ApiExceptionController {
+    @GetMapping("/api/members/{id}")
+    public MemberDto getMember(@PathVariable("id") String id) {
+
+        if (id.equals("ex")) {
+            throw new RuntimeException("잘못된 사용자");
+        }
+        if (id.equals("bad")) {
+            throw new IllegalArgumentException("잘못된 입력 값");
+        }
+
+        return new MemberDto(id, "hello " + id);
+
+    }
+		...
+}
+```
+
+[http://localhost:8080/api/members/bad](http://localhost:8080/api/members/bad) 라고 호출하면 `IllegalArgumentException` 이 발생하도록 만들었습니다.
+
+실행해보면 상태 코드가 500 인 것을 확인할 수 있습니다.
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/0ceac9ab-860c-4174-9406-a62fcb186704/Untitled.png)
+
+### HandlerExceptionResolver
+
+스프링 MVC 는 컨트롤러(핸들러) 바깥으로 예외가 던져진 경우에 예외를 해결하고 동작을 새로 정의할 수 있는 방법을 제공합니다. 
+
+컨트롤러 밖으로 던져진 예외를 해결하고 동작 방식을 변경하고 싶으면 `HanlderExceptionResolver` 을 사용하면 됩니다. 줄여서 `ExceptionResolver` 라고 합니다.
+
+그림을 통해 확인해봅시다.
+
+### ExceptionResolver 적용 전
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/0ad45146-3671-4330-908e-2471accd5a47/Untitled.png)
+
+### ExceptionResolver 적용 후
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/9f87d438-c389-4cd4-b977-8d0bcc4e3bbf/Untitled.png)
+
+참고: `ExceptionResolver` 로 예외를 해결해도 `postHandle()` 은 호출되지 않습니다. 
+
+`HandlerExceptionResolver` - 인터페이스
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/ff5c5429-4561-4ba9-bb0e-a6185d4cca3e/Untitled.png)
+
+`handler`: 핸들러(컨트롤러) 정보
+
+`Exception ex`: 핸들러(컨트롤러)에서 발생한 예외
+
+그렇다면 HandlerExceptionResolver 인터페이스를 구현하는 클래스를 만들어봅시다.
+
+`MyHandlerExceptionResolver`
+
+```java
+@Slf4j
+public class MyHandlerExceptionResolver implements HandlerExceptionResolver {
+    @Override
+    public ModelAndView resolveException(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        try {
+            if (ex instanceof IllegalArgumentException) {
+                log.info("IllegalArgumentException resolver to 400");
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, ex.getMessage());
+                return new ModelAndView();
+            }
+        } catch (IOException e) {
+            log.error("resolver ex", e);
+        }
+        return null;
+    }
+}
+```
+
+`ExceptionResolver` 가 `ModelAndView` 을 반환하는 이유는 마치 `try`, `catch` 을 하듯이 `Exception` 을 처리해서 정상 흐름처럼 변경하는 것이 목적입니다. 이름 그대로 `Exception` 을 `Resolver` 하는 것이지요!
+
+여기서는 `IllegalArgumentException` 이 발생하면 `response.sendError(400)` 을 호출해서 HTTP 상태코드를 400 으로 지정하고 비어있는 `ModelAndView` 을 반환합니다.
+
+### 반환 값에 따른 동작 방식
+
+`HandlerExceptionResolver` 의 반환 값에 따른 `DispatcherServlet` 의 동작방식은 다음과 같습니다.
+
+빈 `ModelAndView` → `new ModelAndView()` 처럼 빈 `ModelAndView` 을 반환하면 뷰를 렌더링하지 않고 정상 흐름으로 서블릿이 리턴됩니다.
+
+`ModelAndView` 지정 → `ModelAndView` 에 `View`, `Model` 등의 정보를 지정해서 반환하면 뷰를 렌더링합니다.
+
+`null` → `null` 을 반환하면 다음 `ExceptionResolver` 을 찾아서 실행합니다. 만약 처리할 수 있는 `ExceptionResolver` 가 없으면 예외 처리가 되지 않고, 기존에 발생한 예외를 서블릿 바깥으로 던집니다.
+
+### ExceptionResolver 활용
+
+예외 상태 코드 변환
+
+예외를 `response.sendError(xxx)` 호출로 변경해서 서블릿에서 상태 코드에 따른 오류를 처리하도록 위임합니다. 이후에 WAS 는 서블릿 오류 페이지를 찾아서 내부 호출합니다. 예를 들어서 스프링 부트가 기본으로 설정한 `/error` 가 호출되는 것처럼 말이죠.
+
+뷰 템플릿 처리
+
+`ModelAndView` 에 값을 채워서 예외에 따른 새로운 오류 화면 뷰를 렌더링해서 고객에게 제공합니다.
+
+API 응답 처리
+
+`response.getWriter().println(”hello”);` 처럼 HTTP 응답 바디에 직접 데이터를 넣어주는 것도 가능합니다. 여기에 JSON 으로 응답하면 API 응답 처리를 할 수 있습니다.
+
+`WebConfig` - 수정(`WebMvcConfigurer` 을 통해 등록함)
+
+```java
+package hello.exception;
+
+import hello.exception.filter.LogFilter;
+import hello.exception.interceptor.LogInterceptor;
+import hello.exception.resolver.MyHandlerExceptionResolver;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import javax.servlet.DispatcherType;
+import javax.servlet.Filter;
+import java.util.List;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+		...
+
+    @Override
+    public void extendHandlerExceptionResolvers(List<HandlerExceptionResolver> resolvers) {
+        resolvers.add(new MyHandlerExceptionResolver());
+    }
+}
+```
+
+`configureHandlerExceptionResolvers(…)` 을 사용하면 스프링이 기본으로 등록하는 `ExceptionResolver` 가 제거되므로 주의합시다. 우리는 `extendHandlerExceptionResolvers` 을 사용합니다.
+
+### Postman 으로 실행
+
+[http://localhost:8080/api/members/ex](http://localhost:8080/api/members/ex) → HTTP 상태 코드 500
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/91748689-5094-4a3b-b9f0-7b36a7f120bb/Untitled.png)
+
+[http://localhost:8080/api/members/bad](http://localhost:8080/api/members/bad) → HTTP 상태 코드 400
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/962c7d7b-4428-4227-90bd-ae78d33e5c2e/Untitled.png)
+
+이렇게 `HandlerExceptionResolver` 을 사용하여 API 예외처리를 수행했습니다.
