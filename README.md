@@ -1423,3 +1423,180 @@ public class WebConfig implements WebMvcConfigurer {
 ![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/962c7d7b-4428-4227-90bd-ae78d33e5c2e/Untitled.png)
 
 이렇게 `HandlerExceptionResolver` 을 사용하여 API 예외처리를 수행했습니다.
+
+# 4. HandlerExceptionResolver 활용
+
+### 예외를 여기서 마무리하기
+
+예외가 발생하면 WAS 까지 예외가 던져지고 WAS 에서 오류 페이지 정보를 찾아서 다시 `/error` 을 호출하는 과정은  너무 복잡합니다. `ExceptionResolver` 을 활용하면 예외가 발생했을 때 이런 복잡한 과정 없이 여기에서 문제를 깔끔하게 해결할 수 있습니다.
+
+예제로 알아봅시다. 먼저 사용자 정의 예외를 하나 추가할 것입니다.
+
+`UserException`
+
+```java
+package hello.exception.exception;
+
+public class UserException extends RuntimeException {
+    public UserException() {
+        super();
+    }
+
+    public UserException(String message) {
+        super(message);
+    }
+
+    public UserException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    public UserException(Throwable cause) {
+        super(cause);
+    }
+
+    protected UserException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
+        super(message, cause, enableSuppression, writableStackTrace);
+    }
+}
+```
+
+`ApiExceptionController` - 예외 추가
+
+```java
+package hello.exception.api;
+
+import hello.exception.exception.UserException;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RestController;
+
+@Slf4j
+@RestController
+public class ApiExceptionController {
+    @GetMapping("/api/members/{id}")
+    public MemberDto getMember(@PathVariable("id") String id) {
+
+        if (id.equals("ex")) {
+            throw new RuntimeException("잘못된 사용자");
+        }
+        if (id.equals("bad")) {
+            throw new IllegalArgumentException("잘못된 입력 값");
+        }
+        if (id.equals("user-ex")) {
+            throw new UserException("사용자 오류");
+        }
+
+        return new MemberDto(id, "hello " + id);
+
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class MemberDto {
+        private String memberId;
+        private String name;
+    }
+
+}
+```
+
+[http://localhost:8080/api/members/user-ex](http://localhost:8080/api/members/user-ex) 호출 시 UserException 이 발생하도록 해두었습니다.
+
+이제 이 예외를 처리하는 `UserHandleExceptionResolver` 을 만들어봅시다.
+
+`UserHandlerExceptionResolver`
+
+```java
+package hello.exception.exception.resolver;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import hello.exception.exception.UserException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.ui.Model;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.ModelAndView;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+
+@Slf4j
+public class UserHandlerExceptionResolver implements HandlerExceptionResolver {
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public ModelAndView resolveException(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+
+        try {
+            if (ex instanceof UserException) {
+                log.info("UserException resolver to 400");
+                String acceptHeader = request.getHeader("accept");
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+
+                if ("application/json".equals(acceptHeader)) {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("ex", ex.getClass());
+                    errorResult.put("message", ex.getMessage());
+                    String result = objectMapper.writeValueAsString(errorResult);
+                    response.setContentType("application/json");
+                    response.setCharacterEncoding("utf-8");
+                    response.getWriter().write(result);
+                    return new ModelAndView();
+                } else {
+                    // TEXT/HTML
+                    return new ModelAndView("error/500");
+                }
+            }
+        } catch (IOException e) {
+            log.error("resolver ex", e);
+        }
+        return null;
+    }
+
+}
+```
+
+HTTP 요청 헤더의 `ACCEPT` 값이 `application/json` 이면 JSON 으로 오류를 내려주고 그 외 경우에는 `error/500` 에 있는 HTML 오류 페이지를 보여줍니다.
+
+`WebConfig` 에 `UserHandlerExceptionResolver` 추가
+
+```java
+@Override
+public void extendHandlerExceptionResolvers(List<HandlerExceptionResolver> resolvers) {
+    resolvers.add(new MyHandlerExceptionResolver());
+    resolvers.add(new UserHandlerExceptionResolver());
+}
+```
+
+### POSTMAN 실행.
+
+http://localhost:8080/api/members/user-ex
+
+`ACCEPT` : `application/json` 인 경우
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/686f0b83-21e9-429d-843c-2c6630b78561/Untitled.png)
+
+`ACCEPT` : `text/html`
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/32b6a516-f2b8-426e-8356-b51a9a3bd2d7/Untitled.png)
+
+정리하자면 아래와 같습니다.
+
+ExceptionResolver 을 사용하면 컨트롤러에서 예외가 발생해도 ExceptionResolver 에서 예외를 처리해버립니다.
+
+따라서 예외가 발생해도 서블릿 컨테이너까지 예외가 전달되지 않고, 스프링 MVC 에서 예외 처리는 끝이 납니다. 
+
+결과적으로 WAS 입장에서는 정상처리된 것으로 인식됩니다. 이렇게 예외를 이곳에서 모두 처리할 수 있다는 것이 핵심입니다!
+
+서블릿 컨테이너까지 예외가 올라가면 복잡하고 지저분하게 추가 프로세스가 실행되지만 `ExceptionResolver` 을 사용하면 예외처리가 상당히 깔끔해집니다.
+
+그런데 직접 `ExceptionResolver` 을 구현하려고 하니 상당히 복잡합니다.
+
+다음 포스팅에서부터 스프링이 제공하는 `ExceptionResolver` 들을 알아봅시다.
