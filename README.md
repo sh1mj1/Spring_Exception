@@ -1600,3 +1600,144 @@ ExceptionResolver 을 사용하면 컨트롤러에서 예외가 발생해도 Exc
 그런데 직접 `ExceptionResolver` 을 구현하려고 하니 상당히 복잡합니다.
 
 다음 포스팅에서부터 스프링이 제공하는 `ExceptionResolver` 들을 알아봅시다.
+
+# 5. 스프링이 제공하는 ExceptionResolver1
+
+스프링 부트가 기본으로 제공하는 `ExceptionResolver` 는 다음과 같습니다.
+
+`HandlerExceptionResolverComposite` 에 아래 순서로 등록함.
+
+.1. `ExceptionHandlerExceptionResolver`
+
+.2. `ResponseStatusExceptionResolver`
+
+.3. `DefaultHandlerExceptionResolver` (우선순위가 가장 낮다.)
+
+**ExceptionHandlerExceptionResolver**
+
+`@ExceptionHandler` 을 처리합니다. API 예외 처리는 대부분 이 기능으로 해결합니다. 조금 뒤에 자세히 설명하겠습니다.
+
+**ResponseStatusExceptionResolver**
+
+HTTP 상태 코드를 지정해줍니다.
+
+예) `@ResponseStatus(value = HttpStatus.NOT_FOUND)`
+
+**DefaultHandlerExceptionResolver**
+
+스프링 내부 기본 예외를 처리합니다.
+
+먼저 가장 쉬운 `ResponseStatusExceptionResolver` 부터 알아봅시다.
+
+### ResponseStatusExceptionResolver
+
+`ResponseStatusExceptionResolver` 는 예외에 따라서 HTTP 상태 코드를 지정해주는 역할을 합니다. 
+
+아래 두 가지 경우를 처리합니다.
+
+`@ResponseStatus` 가 달려있는 예외
+
+`@ResponseStatusException` 예외
+
+하나씩 확인해봅시다.
+
+예외에 아래와 같이 `@ResponseStatus` 애노테이션을 적용하면 HTTP 상태 코드를 변경해줍니다.
+
+`BadRequestException`
+
+```java
+package hello.exception.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+@ResponseStatus(code = HttpStatus.BAD_REQUEST, reason = "잘못된 요청 오류")
+public class BadRequestException extends RuntimeException {
+}
+```
+
+`BadRequestException` 예외가 컨트롤러 바깥으로 넘어간다면 `RequestStatusExceptResolver` 예외가 해당 애노테이션을 확인해서 오류 코드를 `HttpStatus.BAD_REQUEST` (400) 으로 변경하고 메시지도 담습니다.
+
+`ResponseStatusExceptionResolver` 코드를 확인해보면 결국 `response.sendError(statusCode, resolvedReason)` 을 호출하는 것을 확인할 수 있습니다.
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/ded7908e-ad6a-405f-90a2-855487916dba/Untitled.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/92d8b6e8-265e-4eb8-91ca-2d0896221642/Untitled.png)
+
+`sendError(400)` 을 호출했기 때문에 WAS 에서 다시 오류 페이지`(/error)` 을 내부 요청합니다.
+
+`ApiExceptionController` - 추가
+
+```java
+@Slf4j
+@RestController
+public class ApiExceptionController {
+
+    @GetMapping("/api/response-status-ex1")
+    public String responseStatusEx1() {
+        throw new BadRequestException();
+    }
+		...
+}
+```
+
+실행
+
+http://localhost:8080/api/response-status-ex1?message=
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/426ed347-0a8d-4577-9e06-6e2e9444e80b/Untitled.png)
+
+메시지 기능
+
+`reason` 을 `messageSource` 에서 찾는 기능도 제공합니다. ( `reason = “error.bad”` )
+
+`messages.properties`
+
+```java
+error.bad=Wrong Request Error. (Using Message)
+```
+
+`BadRequestException`
+
+```java
+package hello.exception.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+//@ResponseStatus(code = HttpStatus.BAD_REQUEST, reason = "잘못된 요청 오류")
+@ResponseStatus(code = HttpStatus.BAD_REQUEST, reason = "error.bad")
+public class BadRequestException extends RuntimeException {
+}
+```
+
+참고 - 편하게 message 까지 모기 위해서 [`application.properties`](http://application.properties)  에 아래 코드를 추가했습니다.
+
+```java
+server.error.include-message=always
+```
+
+메시지 사용 결과
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/775a4460-6c14-4449-bf5a-78df415c6bd1/Untitled.png)
+
+### ResponseStatusException
+
+`@ResponseStatus` 는 개발자가 직접 변경할 수 없는 예외에는 적용할 수 없습니다. (애노테이션을 직접 넣어야 하는데, 개발자가 코드를 수정할 수 없는 라이브러리의 예외 코드 같은 곳에는 적용할 수 없습니다.)
+
+추가로 애노테이션을 사용하기 때문에 조건에 따라 동적으로 변경하는 것도 어렵습니다. 이 때는 `ResponseStatusException` 예외를 사용하면 됩니다.
+
+`ApiExceptionController` - 추가
+
+```java
+@GetMapping("/api/response-status-ex2")
+public String responseStatusEx2() {
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "error.bad", new IllegalArgumentException());
+}
+```
+
+실행 결과
+
+http://localhost:8080/api/response-status-ex2
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/233b3fe1-c750-4cc9-9911-d14167feb478/Untitled.png)
