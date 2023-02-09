@@ -2053,3 +2053,130 @@ public ModelAndView ex(ViewException e){
 }
 ```
 
+# 8. @ControllerAdvice
+
+`@ExceptionHandler` 을 사용해서 예외를 깔끔하게 처리할 수 있게 되었지만, **현재 정상 코드와 예외 처리 코드가 하나의 컨트롤러에 섞여 있습니다.**
+
+`@ControllerAdvice` 또는 `@RestControllerAdvice` 을 사용하면 둘을 분리할 수 있습니다.
+
+`ExControllerAdvice`
+
+```java
+package hello.exception.exception.exhandler.advice;
+
+import hello.exception.exception.UserException;
+import hello.exception.exhandler.ErrorResult;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+@Slf4j
+@RestControllerAdvice
+public class ExControllerAdvice {
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResult illegalExHandle(IllegalArgumentException e) {
+        log.error("[exceptionHandle] ex", e);
+        return new ErrorResult("BAD", e.getMessage());
+    }
+
+    @ExceptionHandler
+    public ResponseEntity<ErrorResult> userExHandle(UserException e) {
+        log.error("[exceptionHandle] ex", e);
+        ErrorResult errorResult = new ErrorResult("USER-EX", e.getMessage());
+        return new ResponseEntity<>(errorResult, HttpStatus.BAD_REQUEST);
+    }
+
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    @ExceptionHandler
+    public ErrorResult exHandle(Exception e) {
+        log.error("[exceptionHandle] ex", e);
+        return new ErrorResult("EX", "내부 오류");
+    }
+}
+```
+
+그리고 `ExControllerAdvice` 클래스에 있는 메서드들이 예외처리 핸들러로 작동해야 하기 때문에 이전에 `ApiExceptionV2Controller` 코드에 있는 `@ExceptionHandler` 메서드들을 모두 제거합니다.
+
+```java
+package hello.exception.exhandler;
+
+import ...
+
+@Slf4j
+@RestController
+public class ApiExceptionV2Controller {
+   
+    @GetMapping("/api2/members/{id}")
+    public MemberDto getMember(@PathVariable("id") String id) {
+        if (id.equals("ex")) {
+            throw new RuntimeException("잘못된 사용자");
+        }
+        if (id.equals("bad")) {
+            throw new IllegalArgumentException("잘못된 입력 값");
+        }
+        if (id.equals("user-ex")) {
+            throw new UserException("사용자 오류");
+        }
+        return new MemberDto(id, "hello " + id);
+    }
+    @Data
+    @AllArgsConstructor
+    static class MemberDto {
+        private String memberId;
+        private String name;
+    }
+}
+```
+
+이 상태에서 서버를 실행시키고 Postman 으로 테스트해봅시다.
+
+http://localhost:8080/api2/members/bad
+
+http://localhost:8080/api2/members/user-ex
+
+http://localhost:8080/api2/members/ex
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/1db282bc-341c-4d91-8afe-d6664035ca00/Untitled.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/7583c19a-037b-4c1b-aec5-d729fb29cc2e/Untitled.png)
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/7ec570d4-b278-4c3a-b34a-82422aeaab49/Untitled.png)
+
+정상적으로 실행되는 것을 확인할 수 있습니다!
+
+### @ControllerAdvice
+
+`@ControllerAdvice` 는 대상으로 지정한 여러 컨트롤러에 `@ExceptionHandler`, `@InitBinder` 기능을 부여해주는 역할을 합니다.
+
+`@ControllerAdvice` 에 대상을 지정하지 않으면 모든 컨트롤러에 적용됩니다. (글로벌 적용)
+
+`@RestControllerAdvice` 는 `@ControllerAdvice` 와 같으면서 `@ResponseBody` 가 추가되어 있습니다. `@Controller` 와 `@RestController` 의 차이와 같습니다.
+
+### 대상 컨트롤러 지정방법
+
+```java
+// Target all Controllers annotated with @RestController
+@ControllerAdvice(annotations = RestController.class)
+public class ExampleAdvice1 {}
+
+// Target all Controllers within specific packages
+@ControllerAdvice("org.example.controllers")
+public class ExcampleAdvice2 {}
+
+// Target all Controllers assignable to specific classes
+@ControllerAdvice(assignableTypes = { ControllerInterface.class, AbstractController.class})
+public class ExcampleAdvice3 {}
+```
+
+[https://docs.spring.io/spring-framework/docs/current/reference/html/web.html#mvc-ann-controller-advice](https://docs.spring.io/spring-framework/docs/current/reference/html/web.html#mvc-ann-controller-advice) (스프링 공식 문서 참조)
+
+스프링 공식 문서 예제에서처럼 특정 애노테이션이 있는 컨트롤러를 지정할 수도 있고, 특정 패키지를 직접 지정할 수도 있다. 패키지 지정의 경우 해당 패키지와 그 하위에 있는 컨트롤러가 대상이 됩니다.
+
+그리고 특정 클래스를 지정할 수도 있습니다. 대상 컨트롤러 지정을 생략하면 모든 컨트롤러에 적용됩니다.
+
+### 정리
+
+`@ExceptionHandler` 와 `@ControllerAdvice` 을 조합하면 예외를 깔끔하게 해결할 수 있습니다.
